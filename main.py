@@ -2,57 +2,47 @@ import pandas as pd
 import json
 import random
 
-# Cargar datos de congregaciones desde JSON
 with open('congregaciones.json', 'r') as file:
-    congregaciones_data = json.load(file)
+    congregations_data = json.load(file)
 
-df_congregaciones = pd.DataFrame(congregaciones_data)
+df_congregations = pd.DataFrame(congregations_data)
 
-# Cargar datos de turnos de vigilancia desde JSON
 with open('turnos_asignados_y_por_asignar.json', 'r') as file:
-    turnos_data = json.load(file)
+    shifts_data = json.load(file)
 
-df_vigilancia = pd.DataFrame(turnos_data)
+df_shifts = pd.DataFrame(shifts_data)
 
-# Identificar congregaciones congeladas
-congeladas = df_vigilancia['congregacion'].dropna().unique()
+frozen_congregations = df_shifts['congregacion'].dropna().unique()
 
-# Crear un diccionario para contar las asignaciones
-asignaciones = {congregacion: 0 for congregacion in df_congregaciones['congregacion'] if congregacion not in congeladas}
+assignments = {congregation: 0 for congregation in df_congregations['congregacion'] if
+               congregation not in frozen_congregations}
 
 
-# Función para verificar si una congregación tiene restricción en un día específico
-def tiene_restriccion(congregacion, dia, fecha):
-    fila = df_congregaciones[df_congregaciones['congregacion'] == congregacion].iloc[0]
-    if dia in fila['dias_no_asignar'] or fecha in fila['fechas_no_asignar']:
+def has_restriction(congregation, day, date):
+    row = df_congregations[df_congregations['congregacion'] == congregation].iloc[0]
+    if day in row['dias_no_asignar'] or date in row['fechas_no_asignar']:
         return True
     return False
 
 
-# Asignar las congregaciones de manera manual para equilibrar las asignaciones
-for idx, row in df_vigilancia.iterrows():
+for idx, row in df_shifts.iterrows():
     if pd.isna(row['congregacion']):
-        dia = row['dia']
-        fecha = pd.to_datetime(row['fecha'])
-        posibles_congregaciones = [congregacion for congregacion in asignaciones if
-                                   not tiene_restriccion(congregacion, dia, fecha)]
+        day = row['dia']
+        date = pd.to_datetime(row['fecha'])
+        possible_congregations = [congregation for congregation in assignments if
+                                  not has_restriction(congregation, day, date)]
 
-        # Ordenar las congregaciones por el número de asignaciones actuales (ascendente)
-        posibles_congregaciones.sort(key=lambda x: asignaciones[x])
+        possible_congregations.sort(key=lambda x: assignments[x])
 
-        # Aleatorizar las congregaciones con el mismo número de asignaciones
-        min_asignaciones = asignaciones[posibles_congregaciones[0]]
-        min_congregaciones = [c for c in posibles_congregaciones if asignaciones[c] == min_asignaciones]
-        random.shuffle(min_congregaciones)
+        min_assignments = assignments[possible_congregations[0]]
+        min_congregations = [c for c in possible_congregations if assignments[c] == min_assignments]
+        random.shuffle(min_congregations)
 
-        # Asignar la congregación aleatoria con menos asignaciones actuales
-        congregacion_asignada = min_congregaciones[0]
-        df_vigilancia.at[idx, 'congregacion'] = congregacion_asignada
-        asignaciones[congregacion_asignada] += 1
+        assigned_congregation = min_congregations[0]
+        df_shifts.at[idx, 'congregacion'] = assigned_congregation
+        assignments[assigned_congregation] += 1
 
-# Verificar la distribución de asignaciones por congregación
-distribucion_asignaciones_final = df_vigilancia['congregacion'].value_counts()
-print(distribucion_asignaciones_final)
+assignments_distribution = df_shifts['congregacion'].value_counts()
+print(assignments_distribution)
 
-# Exportar el DataFrame a un archivo JSON para descargar
-df_vigilancia.to_csv("programa_de_vigilancia_optimizado.csv", index=False)
+df_shifts.to_csv("programa_de_vigilancia_optimizado.csv", index=False)

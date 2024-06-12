@@ -1,6 +1,5 @@
-schedule.csv
-congregations.csv
-asignaciones_vigilancia.csv
+*.json
+*.csv
 
 # Created by https://www.toptal.com/developers/gitignore/api/macos,intellij+all,python
 # Edit at https://www.toptal.com/developers/gitignore?templates=macos,intellij+all,python

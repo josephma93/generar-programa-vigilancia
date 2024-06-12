@@ -1,78 +1,58 @@
 import pandas as pd
-import pulp
+import json
+import random
 
-# Cargar los datos desde los archivos CSV
-df_guardias = pd.read_csv('schedule.csv')
-df_congregaciones = pd.read_csv('congregations.csv')
+# Cargar datos de congregaciones desde JSON
+with open('congregaciones.json', 'r') as file:
+    congregaciones_data = json.load(file)
 
-# Normalizar los nombres de los días a minúsculas para comparación
-df_guardias['dia'] = df_guardias['dia'].str.lower()
-df_congregaciones['Dia entre semana'] = df_congregaciones['Dia entre semana'].str.lower()
-df_congregaciones['Dia fin de semana'] = df_congregaciones['Dia fin de semana'].str.lower()
+df_congregaciones = pd.DataFrame(congregaciones_data)
 
-# Ordenar las congregaciones por los kilómetros de viaje en ascendente
-df_congregaciones = df_congregaciones.sort_values(by='kms de viaje')
+# Cargar datos de turnos de vigilancia desde JSON
+with open('turnos_asignados_y_por_asignar.json', 'r') as file:
+    turnos_data = json.load(file)
 
-# Crear el problema de optimización
-prob = pulp.LpProblem("AsignacionGuardias", pulp.LpMinimize)
+df_vigilancia = pd.DataFrame(turnos_data)
 
-# Variables de decisión
-x = pulp.LpVariable.dicts("x", [(i, j) for i in df_congregaciones.index for j in df_guardias.index], cat='Binary')
+# Identificar congregaciones congeladas
+congeladas = df_vigilancia['congregacion'].dropna().unique()
 
-# Restricciones
+# Crear un diccionario para contar las asignaciones
+asignaciones = {congregacion: 0 for congregacion in df_congregaciones['congregacion'] if congregacion not in congeladas}
 
-# Evitar asignaciones en días de reunión
-for i in df_congregaciones.index:
-    meeting_day_week = df_congregaciones.loc[i, 'Dia entre semana']
-    meeting_day_weekend = df_congregaciones.loc[i, 'Dia fin de semana']
 
-    for j in df_guardias.index:
-        guard_day = df_guardias.loc[j, 'dia']
+# Función para verificar si una congregación tiene restricción en un día específico
+def tiene_restriccion(congregacion, dia, fecha):
+    fila = df_congregaciones[df_congregaciones['congregacion'] == congregacion].iloc[0]
+    if dia in fila['dias_no_asignar'] or fecha in fila['fechas_no_asignar']:
+        return True
+    return False
 
-        if guard_day == meeting_day_week or guard_day == meeting_day_weekend:
-            prob += x[(i, j)] == 0
 
-# Cada guardia debe ser asignada a una congregación
-for j in df_guardias.index:
-    prob += pulp.lpSum(x[(i, j)] for i in df_congregaciones.index) == 1
+# Asignar las congregaciones de manera manual para equilibrar las asignaciones
+for idx, row in df_vigilancia.iterrows():
+    if pd.isna(row['congregacion']):
+        dia = row['dia']
+        fecha = pd.to_datetime(row['fecha'])
+        posibles_congregaciones = [congregacion for congregacion in asignaciones if
+                                   not tiene_restriccion(congregacion, dia, fecha)]
 
-# Añadir restricciones para balancear las asignaciones
-# Calcular el número promedio de asignaciones
-avg_assignments = len(df_guardias) / len(df_congregaciones)
+        # Ordenar las congregaciones por el número de asignaciones actuales (ascendente)
+        posibles_congregaciones.sort(key=lambda x: asignaciones[x])
 
-# Añadir restricciones para evitar la sobrecarga
-for i in df_congregaciones.index:
-    num_assignments = pulp.lpSum(x[(i, j)] for j in df_guardias.index)
-    prob += num_assignments <= avg_assignments + 1
+        # Aleatorizar las congregaciones con el mismo número de asignaciones
+        min_asignaciones = asignaciones[posibles_congregaciones[0]]
+        min_congregaciones = [c for c in posibles_congregaciones if asignaciones[c] == min_asignaciones]
+        random.shuffle(min_congregaciones)
 
-# Función objetivo: minimizar el número máximo de asignaciones por congregación
-max_assignments = pulp.LpVariable("max_assignments", lowBound=0, cat='Continuous')
-for i in df_congregaciones.index:
-    prob += pulp.lpSum(x[(i, j)] for j in df_guardias.index) <= max_assignments
-prob += max_assignments
+        # Asignar la congregación aleatoria con menos asignaciones actuales
+        congregacion_asignada = min_congregaciones[0]
+        df_vigilancia.at[idx, 'congregacion'] = congregacion_asignada
+        asignaciones[congregacion_asignada] += 1
 
-# Resolver el problema
-prob.solve()
+# Verificar la distribución de asignaciones por congregación
+distribucion_asignaciones_final = df_vigilancia['congregacion'].value_counts()
+print(distribucion_asignaciones_final)
 
-# Resultado
-assignments = []
-for i in df_congregaciones.index:
-    for j in df_guardias.index:
-        if pulp.value(x[(i, j)]) == 1:
-            assignments.append({
-                "Dia": df_guardias.loc[j, 'dia'].capitalize(),
-                "Fecha": df_guardias.loc[j, 'fecha'],
-                "Congregación": df_congregaciones.loc[i, 'Nombre congregación'],
-                "Turno": df_guardias.loc[j, 'turno'],
-                "Horario": df_guardias.loc[j, 'Horario'],
-                "Coordinador": "",
-                "Celular": ""
-            })
-
-df_result = pd.DataFrame(assignments)
-
-# Guardar el resultado en un archivo CSV
-df_result.to_csv('asignaciones_vigilancia.csv', index=False)
-
-# Mostrar el resultado en formato de cadena
-print(df_result.to_string(index=False))
+# Exportar el DataFrame a un archivo JSON para descargar
+df_vigilancia.to_csv("programa_de_vigilancia_optimizado.csv", index=False)
